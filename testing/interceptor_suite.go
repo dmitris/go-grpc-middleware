@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"flag"
+	"fmt"
 	"html/template"
 	"io/ioutil"
 	"net"
@@ -177,6 +178,10 @@ func generateTestCerts() error {
 	}
 
 	defer os.Chdir(oldDir)
+	if fileExists("cert.pem") && fileExists("key.pem") {
+		fmt.Fprintf(os.Stderr, "DMDEBUG - cert & key already exists, skip regen\n")
+		return nil
+	}
 	goroot := runtime.GOROOT()
 	cmd := exec.Command(filepath.Join(goroot, "bin/go"),
 		"run",
@@ -219,4 +224,12 @@ var LocalhostCert = []byte(` + "`" + `{{.Cert}}` + "`" + `)
 		return err
 	}
 	return nil
+}
+
+func fileExists(fname string) bool {
+	info, err := os.Stat(fname)
+	if os.IsNotExist(err) {
+		return false
+	}
+	return !info.IsDir()
 }
