@@ -8,7 +8,6 @@ import (
 	"crypto/tls"
 	"errors"
 	"flag"
-	"fmt"
 	"html/template"
 	"io/ioutil"
 	"net"
@@ -179,7 +178,6 @@ func generateTestCerts() error {
 
 	defer os.Chdir(oldDir)
 	if fileExists("cert.pem") && fileExists("key.pem") {
-		fmt.Fprintf(os.Stderr, "DMDEBUG - cert & key already exists, skip regen\n")
 		return nil
 	}
 	goroot := runtime.GOROOT()
