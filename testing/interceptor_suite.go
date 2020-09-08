@@ -70,6 +70,9 @@ func (s *InterceptorTestSuite) SetupSuite() {
 		for {
 			var err error
 			s.ServerListener, err = net.Listen("tcp", s.serverAddr)
+			if err != nil {
+				s.T().Fatalf("unable to listen on address %s: %v", s.serverAddr, err)
+			}
 			s.serverAddr = s.ServerListener.Addr().String()
 			require.NoError(s.T(), err, "must be able to allocate a port for serverListener")
 			if *flagTls {
