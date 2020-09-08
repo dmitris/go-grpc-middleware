@@ -8,8 +8,6 @@ import (
 	"crypto/tls"
 	"errors"
 	"flag"
-	"html/template"
-	"io/ioutil"
 	"net"
 	"os"
 	"os/exec"
@@ -192,39 +190,8 @@ func generateTestCerts() error {
 		"--host", "localhost,example.com",
 		"--start-date", "Jan 1 00:00:00 2020",
 		"--duration=1000000h")
-	if _, err := cmd.CombinedOutput(); err != nil {
-		return err
-	}
-	keyBytes, err := ioutil.ReadFile("key.pem")
-	if err != nil {
-		return err
-	}
-	certBytes, err := ioutil.ReadFile("cert.pem")
-	if err != nil {
-		return err
-	}
-	data := keycert{
-		Key:  string(keyBytes),
-		Cert: string(certBytes),
-	}
-	// localhost.go template
-	const tmpl = `package certs
-
-var LocalhostKey = []byte(` + "`" + `{{.Key}}` + "`" + `)
-
-var LocalhostCert = []byte(` + "`" + `{{.Cert}}` + "`" + `)
-`
-
-	t := template.Must(template.New("keycert-go").Parse(tmpl))
-	f, err := os.OpenFile("localhost.go", os.O_RDWR|os.O_TRUNC|os.O_CREATE, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if err := t.Execute(f, data); err != nil {
-		return err
-	}
-	return nil
+	_, err = cmd.CombinedOutput()
+	return err
 }
 
 func fileExists(fname string) bool {
