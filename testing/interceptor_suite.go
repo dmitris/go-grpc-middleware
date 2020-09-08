@@ -6,26 +6,19 @@ package grpc_testing
 import (
 	"context"
 	"crypto/tls"
-	"errors"
+	"crypto/x509"
 	"flag"
 	"net"
-	"os"
-	"os/exec"
 	"path"
-	"path/filepath"
 	"runtime"
 	"time"
 
+	"github.com/grpc-ecosystem/go-grpc-middleware/testing/testcert"
 	pb_testproto "github.com/grpc-ecosystem/go-grpc-middleware/testing/testproto"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-)
-
-const (
-	testCertFilename = "cert.pem"
-	testKeyFilename  = "key.pem"
 )
 
 var (
@@ -56,14 +49,10 @@ type InterceptorTestSuite struct {
 }
 
 func (s *InterceptorTestSuite) SetupSuite() {
-	if err := generateTestCerts(); err != nil {
-		s.T().Fatal("failed to generate test certificate: " + err.Error())
-	}
 	s.restartServerWithDelayedStart = make(chan time.Duration)
 	s.serverRunning = make(chan bool)
 
 	s.serverAddr = "127.0.0.1:0"
-
 	go func() {
 		for {
 			var err error
@@ -74,23 +63,25 @@ func (s *InterceptorTestSuite) SetupSuite() {
 			s.serverAddr = s.ServerListener.Addr().String()
 			require.NoError(s.T(), err, "must be able to allocate a port for serverListener")
 			if *flagTls {
-				certFile := path.Join(getTestingCertsPath(), testCertFilename)
-				keyFile := path.Join(getTestingCertsPath(), testKeyFilename)
-				localhostCert, err := tls.LoadX509KeyPair(certFile, keyFile)
-				require.NoError(s.T(), err, "failed loading server credentials for localhostCert")
-				creds := credentials.NewServerTLSFromCert(&localhostCert)
+				cert, err := tls.X509KeyPair(testcert.KeyPairPEM())
+				if err != nil {
+					s.T().Fatalf("unable to load test TLS certificate: %v", err)
+				}
+				creds := credentials.NewServerTLSFromCert(&cert)
 				s.ServerOpts = append(s.ServerOpts, grpc.Creds(creds))
 			}
 			// This is the point where we hook up the interceptor
 			s.Server = grpc.NewServer(s.ServerOpts...)
-			// Crete a service of the instantiator hasn't provided one.
+			// Create a service of the instantiator hasn't provided one.
 			if s.TestService == nil {
 				s.TestService = &TestPingService{T: s.T()}
 			}
 			pb_testproto.RegisterTestServiceServer(s.Server, s.TestService)
 
 			go func() {
-				s.Server.Serve(s.ServerListener)
+				if err := s.Server.Serve(s.ServerListener); err != nil {
+					panic(err)
+				}
 			}()
 			if s.Client == nil {
 				s.Client = s.NewClient(s.ClientOpts...)
@@ -120,9 +111,11 @@ func (s *InterceptorTestSuite) RestartServer(delayedStart time.Duration) <-chan 
 func (s *InterceptorTestSuite) NewClient(dialOpts ...grpc.DialOption) pb_testproto.TestServiceClient {
 	newDialOpts := append(dialOpts, grpc.WithBlock())
 	if *flagTls {
-		creds, err := credentials.NewClientTLSFromFile(
-			path.Join(getTestingCertsPath(), testCertFilename), "localhost")
-		require.NoError(s.T(), err, "failed reading client credentials for "+testCertFilename)
+		cp := x509.NewCertPool()
+		if !cp.AppendCertsFromPEM(testcert.CertPEM()) {
+			s.T().Fatal("failed to append certificate")
+		}
+		creds := credentials.NewTLS(&tls.Config{ServerName: "localhost", RootCAs: cp})
 		newDialOpts = append(newDialOpts, grpc.WithTransportCredentials(creds))
 	} else {
 		newDialOpts = append(newDialOpts, grpc.WithInsecure())
@@ -158,46 +151,4 @@ func (s *InterceptorTestSuite) TearDownSuite() {
 	if s.clientConn != nil {
 		s.clientConn.Close()
 	}
-}
-
-type keycert struct {
-	Key, Cert string
-}
-
-func generateTestCerts() error {
-	oldDir, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	newDir := getTestingCertsPath()
-	if newDir == "" {
-		return errors.New("error generating test certificates - unable to get testing certs path")
-	}
-	if err := os.Chdir(newDir); err != nil {
-		return errors.New("error generating test certificates - unable to chdir to " + newDir)
-	}
-
-	defer os.Chdir(oldDir)
-	if fileExists("cert.pem") && fileExists("key.pem") {
-		return nil
-	}
-	goroot := runtime.GOROOT()
-	cmd := exec.Command(filepath.Join(goroot, "bin/go"),
-		"run",
-		filepath.Join(goroot, "src/crypto/tls/generate_cert.go"),
-		"--ca",
-		"--rsa-bits", "2048",
-		"--host", "localhost,example.com",
-		"--start-date", "Jan 1 00:00:00 2020",
-		"--duration=1000000h")
-	_, err = cmd.CombinedOutput()
-	return err
-}
-
-func fileExists(fname string) bool {
-	info, err := os.Stat(fname)
-	if os.IsNotExist(err) {
-		return false
-	}
-	return !info.IsDir()
 }
